@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minesweeper Ultimate</title>
+
+<style>
+body{
+  font-family:Segoe UI;
+  margin:0;
+  background:linear-gradient(135deg,#1f1f1f,#2c3e50);
+  color:white;
+  text-align:center;
+}
+
+h1{margin:10px;}
+
+.controls{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:10px;
+}
+
+select,input,button{
+  padding:8px;
+  border-radius:8px;
+  border:none;
+}
+
+button{
+  background:#3498db;
+  color:white;
+}
+
+#board{
+  display:grid;
+  justify-content:center;
+  margin:15px auto;
+}
+
+.cell{
+  width:clamp(25px,7vw,40px);
+  height:clamp(25px,7vw,40px);
+  background:#34495e;
+  border:1px solid #2c3e50;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  font-weight:bold;
+  font-size:clamp(14px,4vw,18px);
+}
+
+.revealed{background:#ecf0f1;color:black;}
+.mine{background:#e74c3c;}
+
+#leaderboard{
+  max-width:300px;
+  margin:10px auto;
+  background:#222;
+  padding:10px;
+  border-radius:10px;
+}
+</style>
+</head>
+<body>
+
+<h1>💣 Minesweeper Ultimate</h1>
+
+<div class="controls">
+<select id="difficulty">
+<option value="easy">Easy</option>
+<option value="medium">Medium</option>
+<option value="hard">Hard</option>
+</select>
+
+<input type="text" id="playerName" placeholder="Your Name">
+
+<button onclick="startGame()">Start</button>
+</div>
+
+<div>⏱ <span id="timer">0</span> sec</div>
+
+<div id="board"></div>
+
+<div id="leaderboard">
+<h3>🏆 Leaderboard</h3>
+<ul id="scores"></ul>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"></script>
+
+<script>
+/* 🔥 ใส่ Firebase Config ตรงนี้ */
+const firebaseConfig = {
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_DOMAIN",
+  projectId: "YOUR_ID",
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+/* ================= Game Logic ================= */
+let rows,cols,mines;
+let board=[],time=0,timerInterval;
+let revealed=0,gameOver=false;
+
+function setDifficulty(){
+  let d=document.getElementById("difficulty").value;
+  if(d==="easy"){rows=9;cols=9;mines=10;}
+  if(d==="medium"){rows=16;cols=16;mines=40;}
+  if(d==="hard"){rows=20;cols=20;mines=80;}
+}
+
+function startGame(){
+  clearInterval(timerInterval);
+  time=0;revealed=0;gameOver=false;
+  document.getElementById("timer").textContent=time;
+  setDifficulty();
+  board=[];
+  const b=document.getElementById("board");
+  b.innerHTML="";
+  b.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+
+  for(let r=0;r<rows;r++){
+    board[r]=[];
+    for(let c=0;c<cols;c++){
+      board[r][c]={mine:false,revealed:false};
+      let cell=document.createElement("div");
+      cell.className="cell";
+      cell.onclick=()=>reveal(r,c);
+      b.appendChild(cell);
+      board[r][c].element=cell;
+    }
+  }
+
+  placeMines();
+  timerInterval=setInterval(()=>{
+    if(!gameOver){
+      time++;
+      document.getElementById("timer").textContent=time;
+    }
+  },1000);
+
+  loadLeaderboard();
+}
+
+function placeMines(){
+  let p=0;
+  while(p<mines){
+    let r=Math.floor(Math.random()*rows);
+    let c=Math.floor(Math.random()*cols);
+    if(!board[r][c].mine){
+      board[r][c].mine=true;p++;
+    }
+  }
+}
+
+function reveal(r,c){
+  if(gameOver||board[r][c].revealed)return;
+  board[r][c].revealed=true;
+  board[r][c].element.classList.add("revealed");
+
+  if(board[r][c].mine){
+    board[r][c].element.textContent="💣";
+    endGame(false);
+    return;
+  }
+
+  revealed++;
+  let count=countMines(r,c);
+  if(count>0){
+    board[r][c].element.textContent=count;
+  }else{
+    for(let dr=-1;dr<=1;dr++){
+      for(let dc=-1;dc<=1;dc++){
+        let nr=r+dr,nc=c+dc;
+        if(nr>=0&&nr<rows&&nc>=0&&nc<cols){
+          reveal(nr,nc);
+        }
+      }
+    }
+  }
+
+  if(revealed===rows*cols-mines){
+    endGame(true);
+  }
+}
+
+function countMines(r,c){
+  let count=0;
+  for(let dr=-1;dr<=1;dr++){
+    for(let dc=-1;dc<=1;dc++){
+      let nr=r+dr,nc=c+dc;
+      if(nr>=0&&nr<rows&&nc>=0&&nc<cols){
+        if(board[nr][nc].mine)count++;
+      }
+    }
+  }
+  return count;
+}
+
+function endGame(win){
+  gameOver=true;
+  clearInterval(timerInterval);
+  if(win){
+    let name=document.getElementById("playerName").value||"Anonymous";
+    db.collection("scores").add({
+      name:name,
+      time:time,
+      difficulty:document.getElementById("difficulty").value
+    });
+    alert("🎉 Score Saved!");
+    loadLeaderboard();
+  }else{
+    alert("💥 Game Over");
+  }
+}
+
+function loadLeaderboard(){
+  db.collection("scores")
+    .orderBy("time")
+    .limit(5)
+    .get()
+    .then(snapshot=>{
+      const list=document.getElementById("scores");
+      list.innerHTML="";
+      snapshot.forEach(doc=>{
+        let li=document.createElement("li");
+        li.textContent=`${doc.data().name} - ${doc.data().time}s`;
+        list.appendChild(li);
+      });
+    });
+}
+
+startGame();
+</script>
+
+</body>
+</html>
